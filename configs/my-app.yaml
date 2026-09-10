@@ -26,5 +26,6 @@ codepipeline:
   github_branch: main
   # One-time manual step (see README): create + authorize a CodeStar Connection
   # in the AWS console, then paste its ARN here.
-  connection_arn: "arn:aws:codestar-connections:us-east-1:123456789012:connection/REPLACE-ME"
+  #connection_arn: "arn:aws:codestar-connections:us-east-1:123456789012:connection/REPLACE-ME"
+  connection_arn: "arn:aws:codeconnections:us-east-1:842675988954:connection/39b8586d-b53f-4861-923c-5c0da0c480aa"
   artifact_bucket: order-processor-pipeline-artifacts   # account id gets appended if omitted
