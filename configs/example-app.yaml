@@ -21,8 +21,8 @@ codebuild:
 
 codepipeline:
   pipeline_name: order-processor-pipeline
-  github_owner: your-github-org
-  github_repo: your-repo-name
+  github_owner: manjuappu1375
+  github_repo: github-action-test-fixed
   github_branch: main
   # One-time manual step (see README): create + authorize a CodeStar Connection
   # in the AWS console, then paste its ARN here.
