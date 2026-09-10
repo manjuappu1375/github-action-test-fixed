@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: localstack-yaml-pipeline
+    ports:
+      - "4566:4566"
+    environment:
+      # Only the free/community services this project needs.
+      - SERVICES=sqs,lambda,iam,s3,sts,logs,cloudwatch
+      - DEBUG=0
+      # LocalStack 3 always runs Lambdas in Docker containers - the old
+      # LAMBDA_EXECUTOR var is deprecated/removed, docker socket access below
+      # is what actually makes Lambda invocation work now.
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "localstack-data:/var/lib/localstack"
+
+volumes:
+  localstack-data:

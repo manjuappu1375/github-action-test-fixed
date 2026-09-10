@@ -1,0 +1,103 @@
+name: Test with LocalStack
+
+on:
+  pull_request:
+    paths:
+      - 'configs/**'
+      - 'test/**'
+      - 'scripts/**'
+      - 'lambda-src/**'
+      - 'docker-compose.localstack.yml'
+  push:
+    branches-ignore: [ main ]
+    paths:
+      - 'configs/**'
+      - 'test/**'
+      - 'scripts/**'
+      - 'lambda-src/**'
+
+jobs:
+  test-localstack:
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:3
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: sqs,lambda,iam,s3,sts,logs,cloudwatch
+          # LocalStack 3 always runs Lambdas in Docker containers - the old
+          # LAMBDA_EXECUTOR var is deprecated/removed; the docker socket
+          # mount below is what actually makes Lambda invocation work now.
+          DOCKER_HOST: unix:///var/run/docker.sock
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Wait for LocalStack
+        run: |
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:4566/_localstack/health | grep -q '"sqs": "\(available\|running\)"' && break
+            sleep 2
+          done
+
+      - name: Provision test config into LocalStack
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://localhost:4566
+          SKIP_CODE_SERVICES: "true"
+        run: |
+          chmod +x scripts/provision.sh
+          ./scripts/provision.sh test/configs/example-app.local-test.yaml
+
+      - name: Verify resources exist
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://localhost:4566
+        run: |
+          aws sqs list-queues | grep -q order-processor-queue
+          aws lambda get-function --function-name order-processor-fn >/dev/null
+          aws lambda list-event-source-mappings --function-name order-processor-fn \
+            | grep -q '"State"'
+
+      - name: Invoke Lambda with a test payload
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://localhost:4566
+        run: |
+          aws lambda invoke \
+            --function-name order-processor-fn \
+            --payload '{"Records":[{"body":"ci test message"}]}' \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/invoke-output.json
+          cat /tmp/invoke-output.json
+
+      - name: Re-run to confirm idempotency
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://localhost:4566
+          SKIP_CODE_SERVICES: "true"
+        run: ./scripts/provision.sh test/configs/example-app.local-test.yaml

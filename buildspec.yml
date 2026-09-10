@@ -1,0 +1,24 @@
+version: 0.2
+
+# LAMBDA_NAME and LAMBDA_SRC_DIR are injected as CodeBuild environment
+# variables by scripts/provision.sh when the project is created/updated.
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+  build:
+    commands:
+      - echo "Packaging Lambda from $LAMBDA_SRC_DIR"
+      - cd "$CODEBUILD_SRC_DIR/$LAMBDA_SRC_DIR"
+      - zip -r "$CODEBUILD_SRC_DIR/function.zip" .
+      - cd "$CODEBUILD_SRC_DIR"
+      - echo "Updating Lambda function code"
+      - aws lambda update-function-code
+          --function-name "$LAMBDA_NAME"
+          --zip-file fileb://function.zip
+      - aws lambda wait function-updated --function-name "$LAMBDA_NAME"
+
+artifacts:
+  files:
+    - '**/*'

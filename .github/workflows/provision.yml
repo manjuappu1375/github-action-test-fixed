@@ -1,0 +1,69 @@
+name: Provision AWS Resources from YAML
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'configs/**.yaml'
+      - 'configs/**.yml'
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: 'Path to a specific config YAML to (re)provision, e.g. configs/example-app.yaml'
+        required: true
+
+permissions:
+  id-token: write   # required for OIDC -> AWS role assumption
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Uses GitHub OIDC to assume an AWS IAM role - no long-lived AWS keys
+      # stored in GitHub. See README for the one-time bootstrap of this role.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up Python (for YAML -> JSON parsing)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Determine which config files to provision
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "files=${{ github.event.inputs.config_file }}" >> "$GITHUB_OUTPUT"
+          else
+            # Diff against the previous commit on this push; fall back to
+            # treating every config as new (first push / force-push cases).
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              files=$(git ls-files 'configs/*.yaml' 'configs/*.yml')
+            else
+              files=$(git diff --name-only "$before" "${{ github.sha }}" -- 'configs/*.yaml' 'configs/*.yml')
+            fi
+            echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Provision resources for each changed config
+        run: |
+          chmod +x scripts/provision.sh
+          for f in ${{ steps.changed.outputs.files }}; do
+            [ -z "$f" ] && continue
+            echo "::group::Provisioning from $f"
+            ./scripts/provision.sh "$f"
+            echo "::endgroup::"
+          done

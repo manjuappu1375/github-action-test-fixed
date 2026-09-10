@@ -1,0 +1,30 @@
+app_name: order-processor
+aws_region: us-east-1
+
+lambda:
+  function_name: order-processor-fn
+  runtime: python3.12
+  handler: app.handler
+  memory_size: 128
+  timeout: 30
+  source_dir: lambda-src        # folder in this repo zipped and deployed
+
+sqs:
+  queue_name: order-processor-queue
+  visibility_timeout: 60
+
+codebuild:
+  project_name: order-processor-build
+  buildspec: buildspec.yml
+  image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+  compute_type: BUILD_GENERAL1_SMALL
+
+codepipeline:
+  pipeline_name: order-processor-pipeline
+  github_owner: your-github-org
+  github_repo: your-repo-name
+  github_branch: main
+  # One-time manual step (see README): create + authorize a CodeStar Connection
+  # in the AWS console, then paste its ARN here.
+  connection_arn: "arn:aws:codestar-connections:us-east-1:123456789012:connection/REPLACE-ME"
+  artifact_bucket: order-processor-pipeline-artifacts   # account id gets appended if omitted
