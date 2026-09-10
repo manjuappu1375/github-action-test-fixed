@@ -380,6 +380,13 @@ ensure_codepipeline_role() {
     echo "IAM role already exists: $CP_ROLE_NAME" >&2
   fi
 
+  # AWS renamed "CodeStar Connections" to "CodeConnections" in 2024. Connections
+  # created via the console now get an arn:aws:codeconnections:... ARN instead of
+  # the old arn:aws:codestar-connections:... one. Both IAM action prefixes are
+  # granted here (harmless if your connection ARN happens to be the old style),
+  # plus GetConnectionToken/GetConnection which CodePipeline needs alongside
+  # UseConnection but is easy to miss and not obvious from the error you'd get
+  # without it.
   aws iam put-role-policy --role-name "$CP_ROLE_NAME" \
     --policy-name "${APP_NAME}-codepipeline-policy" \
     --policy-document "{
@@ -397,7 +404,14 @@ ensure_codepipeline_role() {
         },
         {
           \"Effect\": \"Allow\",
-          \"Action\": [\"codestar-connections:UseConnection\"],
+          \"Action\": [
+            \"codestar-connections:UseConnection\",
+            \"codestar-connections:GetConnectionToken\",
+            \"codestar-connections:GetConnection\",
+            \"codeconnections:UseConnection\",
+            \"codeconnections:GetConnectionToken\",
+            \"codeconnections:GetConnection\"
+          ],
           \"Resource\": \"${CONNECTION_ARN}\"
         }
       ]
