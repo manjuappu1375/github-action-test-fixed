@@ -22,6 +22,14 @@ on:
         options:
           - 'no'
           - 'yes'
+      with_lambda_layer:
+        description: 'Also delete all versions of the Lambda layer named by this config? Only say yes if the layer is not shared.'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
 
 permissions:
   id-token: write
@@ -32,35 +40,66 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Install dependencies
         run: pip install pyyaml
 
-      - name: Verify typed app name matches the config file
+      - name: Validate config path and confirmation
+        env:
+          CONFIG_FILE: ${{ inputs.config_file }}
+          CONFIRM_APP_NAME: ${{ inputs.confirm_app_name }}
         run: |
-          actual=$(python3 -c "import yaml; print(yaml.safe_load(open('${{ github.event.inputs.config_file }}'))['app_name'])")
-          if [ "$actual" != "${{ github.event.inputs.confirm_app_name }}" ]; then
-            echo "::error::Typed confirmation '${{ github.event.inputs.confirm_app_name }}' does not match app_name '$actual' in ${{ github.event.inputs.config_file }}. Aborting."
+          case "$CONFIG_FILE" in
+            configs/*.yaml|configs/*.yml) ;;
+            *)
+              echo "::error::config_file must point to configs/*.yaml or configs/*.yml"
+              exit 1
+              ;;
+          esac
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "::error::Config file not found: $CONFIG_FILE"
+            exit 1
+          fi
+          actual=$(python3 - "$CONFIG_FILE" <<'PY'
+          import sys, yaml
+          with open(sys.argv[1]) as f:
+              data = yaml.safe_load(f) or {}
+          print(data.get("app_name", ""))
+          PY
+          )
+          if [ -z "$actual" ]; then
+            echo "::error::Config has no app_name: $CONFIG_FILE"
+            exit 1
+          fi
+          if [ "$actual" != "$CONFIRM_APP_NAME" ]; then
+            echo "::error::Typed confirmation does not match app_name '$actual'. Aborting."
             exit 1
           fi
 
       - name: Deprovision
+        env:
+          CONFIG_FILE: ${{ inputs.config_file }}
+          WITH_IAM_AND_BUCKET: ${{ inputs.with_iam_and_bucket }}
+          WITH_LAMBDA_LAYER: ${{ inputs.with_lambda_layer }}
         run: |
           chmod +x scripts/deprovision.sh
-          flags="--yes"
-          if [ "${{ github.event.inputs.with_iam_and_bucket }}" = "yes" ]; then
-            flags="$flags --with-iam-and-bucket"
+          flags=(--yes)
+          if [ "$WITH_IAM_AND_BUCKET" = "yes" ]; then
+            flags+=(--with-iam-and-bucket)
           fi
-          ./scripts/deprovision.sh "${{ github.event.inputs.config_file }}" $flags
+          if [ "$WITH_LAMBDA_LAYER" = "yes" ]; then
+            flags+=(--with-lambda-layer)
+          fi
+          ./scripts/deprovision.sh "$CONFIG_FILE" "${flags[@]}"

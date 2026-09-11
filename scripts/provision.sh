@@ -143,7 +143,7 @@ run_with_role_retry() {
     fi
     rc=$?
     if echo "$output" | grep -qiE \
-      "cannot be assumed by (Lambda|CodeBuild|CodePipeline)|is not authorized to perform|InvalidParameterValueException.*[Rr]ole" \
+      "cannot be assumed by (Lambda|CodeBuild|CodePipeline)|InvalidParameterValueException.*[Rr]ole|InvalidStructureException.*[Rr]ole" \
       && [ "$attempt" -lt "$max_attempts" ]; then
       echo "  ...role not propagated yet (attempt ${attempt}/${max_attempts}), retrying in ${delay}s" >&2
       sleep "$delay"
@@ -340,13 +340,22 @@ ensure_artifact_bucket() {
       aws s3api create-bucket --bucket "$ARTIFACT_BUCKET" \
         --create-bucket-configuration LocationConstraint="$AWS_REGION" >/dev/null
     fi
-    aws s3api put-bucket-encryption --bucket "$ARTIFACT_BUCKET" \
-      --server-side-encryption-configuration \
-      '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' >/dev/null
-    aws s3api put-public-access-block --bucket "$ARTIFACT_BUCKET" \
-      --public-access-block-configuration \
-      BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true >/dev/null
   fi
+
+  # CodePipeline artifact stores must be versioned.
+  aws s3api put-bucket-versioning \
+    --bucket "$ARTIFACT_BUCKET" \
+    --versioning-configuration Status=Enabled >/dev/null
+
+  aws s3api put-bucket-encryption \
+    --bucket "$ARTIFACT_BUCKET" \
+    --server-side-encryption-configuration \
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' >/dev/null
+
+  aws s3api put-public-access-block \
+    --bucket "$ARTIFACT_BUCKET" \
+    --public-access-block-configuration \
+    BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true >/dev/null
 }
 
 # ---------- CodeBuild role + project ----------
@@ -384,6 +393,11 @@ ensure_codebuild_role() {
           \"Effect\": \"Allow\",
           \"Action\": [\"s3:GetObject\",\"s3:GetObjectVersion\",\"s3:PutObject\"],
           \"Resource\": \"arn:aws:s3:::${ARTIFACT_BUCKET}/*\"
+        },
+        {
+          \"Effect\": \"Allow\",
+          \"Action\": [\"s3:GetBucketAcl\",\"s3:GetBucketLocation\",\"s3:GetBucketVersioning\"],
+          \"Resource\": \"arn:aws:s3:::${ARTIFACT_BUCKET}\"
         },
         {
           \"Effect\": \"Allow\",
@@ -441,6 +455,18 @@ ensure_codepipeline_role() {
     echo "IAM role already exists: $CP_ROLE_NAME" >&2
   fi
 
+  # The connection must have completed the GitHub authorization handshake.
+  if aws codeconnections get-connection       --connection-arn "$CONNECTION_ARN"       --query 'Connection.ConnectionStatus' --output text >/dev/null 2>&1; then
+    connection_status=$(aws codeconnections get-connection       --connection-arn "$CONNECTION_ARN"       --query 'Connection.ConnectionStatus' --output text)
+    if [ "$connection_status" != "AVAILABLE" ]; then
+      echo "ERROR: CodeConnections connection is not AVAILABLE: $CONNECTION_ARN (status: $connection_status)" >&2
+      return 1
+    fi
+  else
+    echo "ERROR: Could not read CodeConnections connection: $CONNECTION_ARN" >&2
+    return 1
+  fi
+
   # AWS renamed "CodeStar Connections" to "CodeConnections" in 2024. Connections
   # created via the console now get an arn:aws:codeconnections:... ARN instead of
   # the old arn:aws:codestar-connections:... one. Both IAM action prefixes are
@@ -455,7 +481,10 @@ ensure_codepipeline_role() {
       \"Statement\": [
         {
           \"Effect\": \"Allow\",
-          \"Action\": [\"s3:GetObject\",\"s3:GetObjectVersion\",\"s3:PutObject\",\"s3:GetBucketVersioning\"],
+          \"Action\": [
+            \"s3:GetObject\",\"s3:GetObjectVersion\",\"s3:PutObject\",\"s3:PutObjectAcl\",
+            \"s3:GetBucketVersioning\",\"s3:GetBucketAcl\",\"s3:GetBucketLocation\",\"s3:ListBucket\"
+          ],
           \"Resource\": [\"arn:aws:s3:::${ARTIFACT_BUCKET}\",\"arn:aws:s3:::${ARTIFACT_BUCKET}/*\"]
         },
         {
@@ -500,7 +529,9 @@ ensure_codepipeline() {
           "configuration": {
             "ConnectionArn": "${CONNECTION_ARN}",
             "FullRepositoryId": "${GH_OWNER}/${GH_REPO}",
-            "BranchName": "${GH_BRANCH}"
+            "BranchName": "${GH_BRANCH}",
+            "OutputArtifactFormat": "CODE_ZIP",
+            "DetectChanges": "true"
           }
         }]
       },

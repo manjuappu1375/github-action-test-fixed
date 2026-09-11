@@ -1,5 +1,9 @@
 name: Provision AWS Resources from YAML
 
+concurrency:
+  group: aws-provision-main
+  cancel-in-progress: false
+
 on:
   push:
     branches: [ main ]
@@ -21,20 +25,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       # Uses GitHub OIDC to assume an AWS IAM role - no long-lived AWS keys
       # stored in GitHub. See README for the one-time bootstrap of this role.
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Set up Python (for YAML -> JSON parsing)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -43,13 +47,30 @@ jobs:
 
       - name: Determine which config files to provision
         id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_CONFIG_FILE: ${{ inputs.config_file }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "files=${{ github.event.inputs.config_file }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            config="$INPUT_CONFIG_FILE"
+            case "$config" in
+              configs/*.yaml|configs/*.yml) ;;
+              *)
+                echo "::error::config_file must point to configs/*.yaml or configs/*.yml"
+                exit 1
+                ;;
+            esac
+            if [ ! -f "$config" ]; then
+              echo "::error::Config file not found: $config"
+              exit 1
+            fi
+            echo "files=$config" >> "$GITHUB_OUTPUT"
           else
             # Diff against the previous commit on this push; fall back to
             # treating every config as new (first push / force-push cases).
-            before="${{ github.event.before }}"
+            before="$BEFORE_SHA"
             if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
               files=$(git ls-files 'configs/*.yaml' 'configs/*.yml')
             else
@@ -60,7 +81,7 @@ jobs:
               # safe enough signal to automatically tear down real AWS
               # resources. Run scripts/deprovision.sh manually, or via the
               # separate Deprovision workflow, when you actually want that.)
-              files=$(git diff --name-only --diff-filter=d "$before" "${{ github.sha }}" -- 'configs/*.yaml' 'configs/*.yml')
+              files=$(git diff --name-only --diff-filter=d "$before" "$CURRENT_SHA" -- 'configs/*.yaml' 'configs/*.yml')
             fi
             echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
           fi

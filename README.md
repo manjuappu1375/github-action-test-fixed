@@ -68,7 +68,7 @@ a human clicking a button in the AWS console — everything else is scripted.
 From a machine with admin AWS credentials:
 
 ```bash
-./scripts/bootstrap-oidc-role.sh your-github-org your-repo-name
+./scripts/bootstrap-oidc-role.sh manjuappu1375 github-action-test-fixed github-actions-deploy-role main
 ```
 
 This creates the GitHub OIDC provider and an IAM role GitHub Actions assumes
@@ -127,3 +127,24 @@ AWS Resources from YAML → Run workflow** and give it the config path.
   `codepipeline.github_repo` aren't still the example placeholders, and
   fails immediately with a clear message instead of partway through
   provisioning.
+
+
+## CI/CD hardening included
+
+- GitHub Actions uses Node 24-compatible action versions (`checkout@v5`, `setup-python@v7`, `configure-aws-credentials@v6`).
+- The OIDC bootstrap resolves the immutable GitHub repository subject (`owner_id` + `repo_id`) and scopes trust to the `main` branch.
+- The deploy role includes the required `codeconnections:PassConnection` permission for CodePipeline creation/update.
+- The CodePipeline artifact bucket is always versioned, encrypted, and public-access-blocked.
+- CodePipeline and CodeBuild S3 permissions include the bucket-level checks AWS requires for artifact access.
+- Provisioning retries only IAM role-propagation errors; permanent authorization failures are not retried for minutes.
+- Deleted config files are skipped and never passed to `provision.sh`.
+- Manual workflow inputs are validated before being used as file paths.
+- Provisioning is serialized on `main` so two concurrent runs do not race over the same resources.
+
+
+### Deprovision safety
+
+`deprovision.yml` is manual-only. It validates that the selected file is under
+`configs/`, requires the exact `app_name` as confirmation, and defaults to
+leaving IAM roles, the artifact bucket, and Lambda layer versions alone.
+Those shared/destructive resources require explicit workflow options.

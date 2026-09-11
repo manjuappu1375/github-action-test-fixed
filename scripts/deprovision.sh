@@ -36,11 +36,13 @@ shift || true
 
 ASSUME_YES=false
 WITH_IAM_AND_BUCKET=false
+WITH_LAMBDA_LAYER=false
 DRY_RUN=false
 for arg in "$@"; do
   case "$arg" in
     --yes) ASSUME_YES=true ;;
     --with-iam-and-bucket) WITH_IAM_AND_BUCKET=true ;;
+    --with-lambda-layer) WITH_LAMBDA_LAYER=true ;;
     --dry-run) DRY_RUN=true ;;
     *) echo "Unknown flag: $arg" >&2; exit 1 ;;
   esac
@@ -96,6 +98,7 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 APP_NAME=$(jqv '.app_name')
 LAMBDA_NAME=$(jqv '.lambda.function_name')
+LAYER_NAME=$(jqv_or '.lambda.layer.name' "")
 QUEUE_NAME=$(jqv '.sqs.queue_name')
 CB_PROJECT=$(jqv '.codebuild.project_name')
 CP_NAME=$(jqv '.codepipeline.pipeline_name')
@@ -111,6 +114,12 @@ echo "  CodeBuild project:   $CB_PROJECT"
 echo "  Lambda function:     $LAMBDA_NAME"
 echo "  SQS queue:           $QUEUE_NAME"
 echo "  (event source mapping between the two above will be removed first)"
+if [ -n "$LAYER_NAME" ]; then
+  echo "  Lambda layer:        $LAYER_NAME"
+  if [ "$WITH_LAMBDA_LAYER" != "true" ]; then
+    echo "  Lambda layer versions will be LEFT ALONE (pass --with-lambda-layer to remove them)."
+  fi
+fi
 if [ "$WITH_IAM_AND_BUCKET" = "true" ]; then
   echo "  --with-iam-and-bucket was passed, ALSO deleting:"
   echo "    IAM roles:         $LAMBDA_ROLE_NAME, $CB_ROLE_NAME, $CP_ROLE_NAME"
@@ -165,6 +174,20 @@ if [ -n "$QUEUE_URL" ] && [ "$QUEUE_URL" != "None" ]; then
       echo "Deleting event source mapping: $uuid"
       aws lambda delete-event-source-mapping --uuid "$uuid" >/dev/null
     done
+  fi
+fi
+
+# ---------- Optional: Lambda layer versions ----------
+if [ "$WITH_LAMBDA_LAYER" = "true" ] && [ -n "$LAYER_NAME" ]; then
+  if aws lambda list-layer-versions --layer-name "$LAYER_NAME" >/dev/null 2>&1; then
+    echo "Deleting Lambda layer versions: $LAYER_NAME"
+    versions=$(aws lambda list-layer-versions       --layer-name "$LAYER_NAME"       --query 'Versions[].Version' --output text 2>/dev/null || true)
+    for version in $versions; do
+      [ -z "$version" ] || [ "$version" = "None" ] && continue
+      aws lambda delete-layer-version         --layer-name "$LAYER_NAME"         --version-number "$version" >/dev/null
+    done
+  else
+    echo "Lambda layer already gone: $LAYER_NAME"
   fi
 fi
 
