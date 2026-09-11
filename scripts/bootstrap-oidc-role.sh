@@ -100,7 +100,7 @@ aws iam put-role-policy --role-name "$ROLE_NAME" \
           \"codepipeline:*\",
           \"codestar-connections:UseConnection\",\"codestar-connections:GetConnectionToken\",\"codestar-connections:GetConnection\",
           \"codeconnections:UseConnection\",\"codeconnections:GetConnectionToken\",\"codeconnections:GetConnection\",
-          \"s3:CreateBucket\",\"s3:PutBucketEncryption\",\"s3:PutPublicAccessBlock\",\"s3:PutBucketVersioning\",
+          \"s3:CreateBucket\",\"s3:PutEncryptionConfiguration\",\"s3:PutPublicAccessBlock\",\"s3:PutBucketVersioning\",
           \"s3:GetObject\",\"s3:GetObjectVersion\",\"s3:PutObject\",\"s3:HeadBucket\",\"s3:ListBucket\",
           \"s3:GetBucketAcl\",\"s3:GetBucketLocation\",\"s3:GetBucketVersioning\",
           \"logs:*\",
