@@ -10,6 +10,9 @@ on:
     paths:
       - 'configs/**.yaml'
       - 'configs/**.yml'
+      # A provisioning-code change must be applied to every managed config.
+      - 'scripts/provision.sh'
+      - '.github/workflows/provision.yml'
   workflow_dispatch:
     inputs:
       config_file:
@@ -72,6 +75,9 @@ jobs:
             # treating every config as new (first push / force-push cases).
             before="$BEFORE_SHA"
             if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              files=$(git ls-files 'configs/*.yaml' 'configs/*.yml')
+            elif ! git diff --quiet "$before" "$CURRENT_SHA" -- scripts/provision.sh .github/workflows/provision.yml; then
+              # Reconcile every config when the provisioner itself changes.
               files=$(git ls-files 'configs/*.yaml' 'configs/*.yml')
             else
               # --diff-filter=d excludes deleted files - a deleted config
