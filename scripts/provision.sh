@@ -64,6 +64,22 @@ LAMBDA_MEMORY=$(jqv_or '.lambda.memory_size' "128")
 LAMBDA_TIMEOUT=$(jqv_or '.lambda.timeout' "30")
 LAMBDA_SRC_DIR=$(jqv_or '.lambda.source_dir' "src")
 
+# Optional Lambda Layer support:
+#   lambda:
+#     layer:                          # builds+publishes a NEW layer version from local code
+#       name: my-deps-layer
+#       source_dir: lambda-layer      # must contain e.g. python/ for a Python runtime
+#       compatible_runtimes: [python3.12]   # optional, defaults to lambda.runtime
+#       description: "shared deps"    # optional
+#     layers:                         # optional: existing layer ARNs to attach as-is too
+#       - arn:aws:lambda:us-east-1:123456789012:layer:some-shared-layer:3
+LAYER_NAME=$(jqv_or '.lambda.layer.name' "")
+LAYER_SRC_DIR=$(jqv_or '.lambda.layer.source_dir' "")
+LAYER_DESC=$(jqv_or '.lambda.layer.description' "Layer for ${APP_NAME}")
+LAYER_RUNTIMES=$(echo "$CONFIG_JSON" | jq -r '.lambda.layer.compatible_runtimes[]? // empty')
+[ -z "$LAYER_RUNTIMES" ] && LAYER_RUNTIMES="$LAMBDA_RUNTIME"
+mapfile -t EXTRA_LAYER_ARNS < <(echo "$CONFIG_JSON" | jq -r '.lambda.layers[]? // empty')
+
 QUEUE_NAME=$(jqv '.sqs.queue_name')
 VISIBILITY_TIMEOUT=$(jqv_or '.sqs.visibility_timeout' "30")
 
@@ -215,8 +231,51 @@ package_lambda() {
   echo "$zip_path"
 }
 
+# Publishes a new Lambda Layer version from lambda.layer.source_dir, if
+# configured. Layers are immutable/versioned in AWS - there's no "update in
+# place," every run publishes a new version and this returns its ARN
+# (including the version number). Prints nothing and returns empty if no
+# lambda.layer block is set, so callers can safely treat the result as
+# optional.
+ensure_lambda_layer() {
+  [ -z "$LAYER_NAME" ] && return 0
+  if [ ! -d "$LAYER_SRC_DIR" ]; then
+    echo "ERROR: lambda.layer.source_dir '$LAYER_SRC_DIR' does not exist (relative to repo root)." >&2
+    exit 1
+  fi
+  local zip_path="/tmp/${LAYER_NAME}-layer.zip"
+  rm -f "$zip_path"
+  (cd "$LAYER_SRC_DIR" && zip -r -q "$zip_path" .)
+
+  echo "Publishing Lambda layer version: $LAYER_NAME (runtimes: $LAYER_RUNTIMES)" >&2
+  aws lambda publish-layer-version \
+    --layer-name "$LAYER_NAME" \
+    --description "$LAYER_DESC" \
+    --zip-file "fileb://${zip_path}" \
+    --compatible-runtimes $LAYER_RUNTIMES \
+    --query 'LayerVersionArn' --output text
+}
+
+# Combines the freshly-built layer (if any) with any pre-existing layer ARNs
+# listed under lambda.layers, as the final --layers argument for the
+# function. Echoes nothing (an empty list) if there are no layers at all -
+# callers should check for that before passing --layers, since the AWS CLI
+# has no shorthand for "explicitly zero layers."
+resolve_all_layers() {
+  local built_arn="$1"
+  local all=()
+  [ -n "$built_arn" ] && [ "$built_arn" != "None" ] && all+=("$built_arn")
+  for arn in "${EXTRA_LAYER_ARNS[@]}"; do
+    [ -n "$arn" ] && all+=("$arn")
+  done
+  printf '%s\n' "${all[@]}"
+}
+
 deploy_lambda() {
   local role_arn="$1" zip_path="$2" queue_url="$3"
+  mapfile -t all_layers < <(resolve_all_layers "$4")
+  local layers_args=()
+  [ "${#all_layers[@]}" -gt 0 ] && layers_args=(--layers "${all_layers[@]}")
 
   if aws lambda get-function --function-name "$LAMBDA_NAME" >/dev/null 2>&1; then
     echo "Updating existing Lambda: $LAMBDA_NAME"
@@ -231,7 +290,8 @@ deploy_lambda() {
       --handler "$LAMBDA_HANDLER" \
       --memory-size "$LAMBDA_MEMORY" \
       --timeout "$LAMBDA_TIMEOUT" \
-      --environment "Variables={QUEUE_URL=${queue_url}}" >/dev/null
+      --environment "Variables={QUEUE_URL=${queue_url}}" \
+      "${layers_args[@]}" >/dev/null
     aws lambda wait function-updated --function-name "$LAMBDA_NAME"
   else
     echo "Creating Lambda: $LAMBDA_NAME"
@@ -243,7 +303,8 @@ deploy_lambda() {
       --memory-size "$LAMBDA_MEMORY" \
       --timeout "$LAMBDA_TIMEOUT" \
       --zip-file "fileb://${zip_path}" \
-      --environment "Variables={QUEUE_URL=${queue_url}}" >/dev/null
+      --environment "Variables={QUEUE_URL=${queue_url}}" \
+      "${layers_args[@]}" >/dev/null
     aws lambda wait function-active --function-name "$LAMBDA_NAME"
   fi
 }
@@ -484,7 +545,8 @@ QUEUE_ARN=$(sqs_arn_from_url "$QUEUE_URL")
 
 LAMBDA_ROLE_ARN=$(ensure_lambda_role)
 ZIP_PATH=$(package_lambda)
-deploy_lambda "$LAMBDA_ROLE_ARN" "$ZIP_PATH" "$QUEUE_URL"
+BUILT_LAYER_ARN=$(ensure_lambda_layer)
+deploy_lambda "$LAMBDA_ROLE_ARN" "$ZIP_PATH" "$QUEUE_URL" "$BUILT_LAYER_ARN"
 ensure_event_source_mapping "$QUEUE_ARN"
 
 ensure_artifact_bucket

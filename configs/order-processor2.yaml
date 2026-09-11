@@ -1,21 +1,37 @@
-# A SECOND, independent Lambda+queue+pipeline. Note every name below is
-# distinct from example-app.yaml's - app_name (so IAM roles don't collide),
-# and codebuild/codepipeline names too (those are literal AWS resource names,
-# not derived from app_name, so they'd collide across configs if reused).
+# A SECOND, independent Lambda + its own queue + its own CodeBuild + its own
+# CodePipeline. Every name below is distinct from example-app.yaml's:
+# - app_name (so IAM roles don't collide)
+# - codebuild.project_name / codepipeline.pipeline_name (these are literal
+#   AWS resource names, not derived from app_name, so they'd collide across
+#   configs if reused)
 app_name: order-processor2
 
 aws_region: us-east-1
 
 lambda:
-  function_name: order-processor1
+  function_name: order-processor2-fn
   runtime: python3.12
   handler: app.handler
   memory_size: 128
   timeout: 30
   source_dir: lambda-src
 
+  # Optional: attach a Lambda Layer built from local code. Every run
+  # publishes a new immutable layer version and points the function at the
+  # latest one - this is how AWS layers work, there's no "update in place."
+  layer:
+    name: order-processor2-deps
+    source_dir: lambda-layer        # must contain python/ for a Python runtime
+    compatible_runtimes: [python3.12]
+    description: "Shared dependencies for order-processor2"
+
+  # Optional: also attach any already-existing layers by ARN (e.g. a shared
+  # layer another team publishes, or an AWS-provided one).
+  # layers:
+  #   - arn:aws:lambda:us-east-1:123456789012:layer:some-shared-layer:3
+
 sqs:
-  queue_name: order-processor-queue1
+  queue_name: order-processor2-queue
   visibility_timeout: 60
 
 codebuild:
