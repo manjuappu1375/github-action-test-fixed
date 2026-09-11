@@ -59,7 +59,7 @@ jobs:
             arn:*:sts::*:assumed-role/*/*) ;;
             *) echo "::error::Expected an assumed-role ARN, got: $caller_arn"; exit 1 ;;
           esac
-          aws iam put-role-policy --role-name "$role_name" --policy-name provisioning-s3-artifacts --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:CreateBucket","Resource":"*"},{"Effect":"Allow","Action":["s3:GetBucketAcl","s3:GetBucketLocation","s3:GetBucketVersioning","s3:ListBucket","s3:PutEncryptionConfiguration","s3:PutBucketVersioning","s3:PutPublicAccessBlock"],"Resource":"arn:aws:s3:::*"}]}'
+          aws iam put-role-policy --role-name "$role_name" --policy-name provisioning-s3-artifacts --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:CreateBucket","Resource":"*"},{"Effect":"Allow","Action":["s3:GetBucketAcl","s3:GetBucketLocation","s3:GetBucketVersioning","s3:ListBucket","s3:PutEncryptionConfiguration","s3:PutBucketVersioning","s3:PutBucketPublicAccessBlock"],"Resource":"arn:aws:s3:::*"}]}'
 
       - name: Determine which config files to provision
         id: changed
