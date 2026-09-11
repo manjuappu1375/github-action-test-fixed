@@ -22,6 +22,10 @@ sqs:
   queue_name: order-processor-queue
   visibility_timeout: 60
 
+sqs:
+  queue_name: order-processor-queue1
+  visibility_timeout: 60
+
 codebuild:
   project_name: order-processor-build
   buildspec: buildspec.yml
