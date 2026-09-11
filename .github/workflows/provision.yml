@@ -48,6 +48,19 @@ jobs:
       - name: Install dependencies
         run: pip install pyyaml
 
+      # Older deployments granted iam:PutRolePolicy but omitted the S3 bucket
+      # hardening actions. Repair only the role currently assumed by this job.
+      - name: Ensure artifact-bucket permissions
+        run: |
+          caller_arn=$(aws sts get-caller-identity --query Arn --output text)
+          role_name=${caller_arn#*:assumed-role/}
+          role_name=${role_name%%/*}
+          case "$caller_arn" in
+            arn:*:sts::*:assumed-role/*/*) ;;
+            *) echo "::error::Expected an assumed-role ARN, got: $caller_arn"; exit 1 ;;
+          esac
+          aws iam put-role-policy --role-name "$role_name" --policy-name provisioning-s3-artifacts --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:CreateBucket","Resource":"*"},{"Effect":"Allow","Action":["s3:GetBucketAcl","s3:GetBucketLocation","s3:GetBucketVersioning","s3:ListBucket","s3:PutBucketEncryption","s3:PutBucketVersioning","s3:PutPublicAccessBlock"],"Resource":"arn:aws:s3:::*"}]}'
+
       - name: Determine which config files to provision
         id: changed
         env:
