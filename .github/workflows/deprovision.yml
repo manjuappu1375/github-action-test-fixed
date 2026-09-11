@@ -1,0 +1,66 @@
+name: Deprovision AWS Resources from YAML
+
+# Deliberately workflow_dispatch only - this deletes real AWS resources and
+# must never run from a push. Requires typing the app_name from the chosen
+# config file as an extra confirmation, on top of the confirm-typed-name
+# check deprovision.sh itself does.
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: 'Path to the config YAML whose resources should be deleted, e.g. configs/my-test.yaml'
+        required: true
+      confirm_app_name:
+        description: 'Type the app_name from that config file exactly, to confirm you want to delete its resources'
+        required: true
+      with_iam_and_bucket:
+        description: 'Also delete the IAM roles and S3 artifact bucket? Only say yes if no other config shares this app_name.'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deprovision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Verify typed app name matches the config file
+        run: |
+          actual=$(python3 -c "import yaml; print(yaml.safe_load(open('${{ github.event.inputs.config_file }}'))['app_name'])")
+          if [ "$actual" != "${{ github.event.inputs.confirm_app_name }}" ]; then
+            echo "::error::Typed confirmation '${{ github.event.inputs.confirm_app_name }}' does not match app_name '$actual' in ${{ github.event.inputs.config_file }}. Aborting."
+            exit 1
+          fi
+
+      - name: Deprovision
+        run: |
+          chmod +x scripts/deprovision.sh
+          flags="--yes"
+          if [ "${{ github.event.inputs.with_iam_and_bucket }}" = "yes" ]; then
+            flags="$flags --with-iam-and-bucket"
+          fi
+          ./scripts/deprovision.sh "${{ github.event.inputs.config_file }}" $flags
