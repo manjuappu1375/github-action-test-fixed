@@ -264,11 +264,22 @@ ensure_lambda_layer() {
 resolve_all_layers() {
   local built_arn="$1"
   local all=()
-  [ -n "$built_arn" ] && [ "$built_arn" != "None" ] && all+=("$built_arn")
+
+  if [ -n "$built_arn" ] && [ "$built_arn" != "None" ]; then
+    all+=("$built_arn")
+  fi
+
   for arn in "${EXTRA_LAYER_ARNS[@]}"; do
-    [ -n "$arn" ] && all+=("$arn")
+    if [ -n "$arn" ]; then
+      all+=("$arn")
+    fi
   done
-  printf '%s\n' "${all[@]}"
+
+  # Important: printf with an empty array can emit a blank line.
+  # That blank line would become an empty Layers[0] value.
+  if [ "${#all[@]}" -gt 0 ]; then
+    printf '%s\n' "${all[@]}"
+  fi
 }
 
 deploy_lambda() {
