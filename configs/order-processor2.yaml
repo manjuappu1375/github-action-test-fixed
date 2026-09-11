@@ -1,0 +1,33 @@
+# A SECOND, independent Lambda+queue+pipeline. Note every name below is
+# distinct from example-app.yaml's - app_name (so IAM roles don't collide),
+# and codebuild/codepipeline names too (those are literal AWS resource names,
+# not derived from app_name, so they'd collide across configs if reused).
+app_name: order-processor2
+
+aws_region: us-east-1
+
+lambda:
+  function_name: order-processor1
+  runtime: python3.12
+  handler: app.handler
+  memory_size: 128
+  timeout: 30
+  source_dir: lambda-src
+
+sqs:
+  queue_name: order-processor-queue1
+  visibility_timeout: 60
+
+codebuild:
+  project_name: order-processor2-build
+  buildspec: buildspec.yml
+  image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+  compute_type: BUILD_GENERAL1_SMALL
+
+codepipeline:
+  pipeline_name: order-processor2-pipeline
+  github_owner: manjuappu1375
+  github_repo: github-action-test-fixed
+  github_branch: main
+  connection_arn: "arn:aws:codeconnections:us-east-1:842675988954:connection/39b8586d-b53f-4861-923c-5c0da0c480aa"
+  artifact_bucket: order-processor2-pipeline-artifacts

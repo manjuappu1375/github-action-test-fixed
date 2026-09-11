@@ -7,23 +7,10 @@ lambda:
   handler: app.handler
   memory_size: 128
   timeout: 30
-  source_dir: lambda-src    
-  
-
-lambda:
-  function_name: order-processor1
-  runtime: python3.12
-  handler: app.handler
-  memory_size: 128
-  timeout: 30
-  source_dir: lambda-src     # folder in this repo zipped and deployed
+  source_dir: lambda-src        # folder in this repo zipped and deployed
 
 sqs:
   queue_name: order-processor-queue
-  visibility_timeout: 60
-
-sqs:
-  queue_name: order-processor-queue1
   visibility_timeout: 60
 
 codebuild:
