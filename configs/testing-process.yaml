@@ -1,0 +1,49 @@
+# A SECOND, independent Lambda + its own queue + its own CodeBuild + its own
+# CodePipeline. Every name below is distinct from example-app.yaml's:
+# - app_name (so IAM roles don't collide)
+# - codebuild.project_name / codepipeline.pipeline_name (these are literal
+#   AWS resource names, not derived from app_name, so they'd collide across
+#   configs if reused)
+app_name: testing-process
+
+aws_region: us-east-1
+
+lambda:
+  function_name: testing-process-fn
+  runtime: python3.13
+  handler: app.handler
+  memory_size: 128
+  timeout: 30
+  source_dir: lambda-src
+  # Existing functions are preserved on future provisioning runs. Set true
+  # only if this YAML should overwrite manual runtime/layer/config changes.
+  reconcile_existing: false
+
+  # Optional: attach a Lambda Layer built from local code when the function
+  # is first created (or when reconcile_existing is explicitly true).
+layer:
+    name: order-processor2-deps
+    arn: arn:aws:lambda:us-east-1:842675988954:layer:testing-layer:2
+
+  # Optional: also attach any already-existing layers by ARN (e.g. a shared
+  # layer another team publishes, or an AWS-provided one).
+  # layers:
+  #   - arn:aws:lambda:us-east-1:123456789012:layer:some-shared-layer:3
+
+sqs:
+  queue_name: order-processor2-queue
+  visibility_timeout: 60
+
+codebuild:
+  project_name: order-processor2-build
+  buildspec: buildspec.yml
+  image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+  compute_type: BUILD_GENERAL1_SMALL
+
+codepipeline:
+  pipeline_name: order-processor2-pipeline
+  github_owner: manjuappu1375
+  github_repo: github-action-test-fixed
+  github_branch: main
+  connection_arn: "arn:aws:codeconnections:us-east-1:842675988954:connection/39b8586d-b53f-4861-923c-5c0da0c480aa"
+  artifact_bucket: order-processor2-pipeline-artifacts
