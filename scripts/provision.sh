@@ -204,9 +204,9 @@ run_with_role_retry() {
     if output=$("$@" 2>&1); then
       [ -n "$output" ] && printf '%s\n' "$output"
       return 0
+    else
+      rc=$?
     fi
-
-    rc=$?
 
     if echo "$output" |
       grep -qiE \
@@ -232,6 +232,42 @@ run_with_role_retry() {
 # SQS
 # ============================================================
 
+create_sqs_queue() {
+  local max_attempts=7
+  local attempt=1
+  local output
+  local rc
+
+  # AWS reserves a recently deleted queue name for 60 seconds. Retry only
+  # that documented transient error; fail immediately for every other error.
+  while :; do
+    if output=$(aws sqs create-queue \
+      --queue-name "$QUEUE_NAME" \
+      --attributes "VisibilityTimeout=${VISIBILITY_TIMEOUT}" \
+      --query 'QueueUrl' \
+      --output text 2>&1); then
+
+      printf '%s\n' "$output"
+      return 0
+    else
+      rc=$?
+    fi
+
+
+    if echo "$output" | grep -q "QueueDeletedRecently" &&
+       [ "$attempt" -lt "$max_attempts" ]; then
+
+      echo "SQS queue was deleted recently; waiting 10 seconds before retrying (attempt ${attempt}/${max_attempts})" >&2
+      sleep 10
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    printf '%s\n' "$output" >&2
+    return "$rc"
+  done
+}
+
 ensure_sqs_queue() {
   local url
 
@@ -247,13 +283,9 @@ ensure_sqs_queue() {
 
     echo "Creating SQS queue: $QUEUE_NAME" >&2
 
-    url=$(
-      aws sqs create-queue \
-        --queue-name "$QUEUE_NAME" \
-        --attributes "VisibilityTimeout=${VISIBILITY_TIMEOUT}" \
-        --query 'QueueUrl' \
-        --output text
-    )
+    if ! url=$(create_sqs_queue); then
+      return 1
+    fi
 
   else
 
