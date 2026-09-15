@@ -10,19 +10,15 @@ aws_region: us-east-1
 
 lambda:
   function_name: testing-process-fn
-  runtime: python3.13
+  runtime: python3.14
   handler: app.handler
-  memory_size: 128
+  memory_size: 256
   timeout: 30
   source_dir: lambda-src
-  # Existing functions are preserved on future provisioning runs. Set true
-  # only if this YAML should overwrite manual runtime/layer/config changes.
   reconcile_existing: false
 
-  # Optional: attach a Lambda Layer built from local code when the function
-  # is first created (or when reconcile_existing is explicitly true).
-layer:
-    name: testing-process-deps
+  # Use an existing published layer
+  layer:
     arn: arn:aws:lambda:us-east-1:842675988954:layer:testing-layer:2
 
   # Optional: also attach any already-existing layers by ARN (e.g. a shared
