@@ -8,6 +8,9 @@ lambda:
   memory_size: 128
   timeout: 30
   source_dir: lambda-src        # folder in this repo zipped and deployed
+  # Leave manual Lambda code/runtime/layer/configuration changes intact on
+  # later provisioning runs. Set true only to make this YAML authoritative.
+  reconcile_existing: false
 
 sqs:
   queue_name: order-processor-queue

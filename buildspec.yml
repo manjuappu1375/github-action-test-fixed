@@ -9,6 +9,11 @@ phases:
       python: 3.12
   build:
     commands:
+      - |
+          if [ "${LAMBDA_RECONCILE_EXISTING:-false}" != "true" ]; then
+            echo "Preserving the existing Lambda code; set lambda.reconcile_existing: true to deploy from CodeBuild."
+            exit 0
+          fi
       - echo "Packaging Lambda from $LAMBDA_SRC_DIR"
       - cd "$CODEBUILD_SRC_DIR/$LAMBDA_SRC_DIR"
       - zip -r "$CODEBUILD_SRC_DIR/function.zip" .

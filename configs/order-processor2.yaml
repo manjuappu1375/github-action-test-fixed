@@ -15,10 +15,12 @@ lambda:
   memory_size: 128
   timeout: 30
   source_dir: lambda-src
+  # Existing functions are preserved on future provisioning runs. Set true
+  # only if this YAML should overwrite manual runtime/layer/config changes.
+  reconcile_existing: false
 
-  # Optional: attach a Lambda Layer built from local code. Every run
-  # publishes a new immutable layer version and points the function at the
-  # latest one - this is how AWS layers work, there's no "update in place."
+  # Optional: attach a Lambda Layer built from local code when the function
+  # is first created (or when reconcile_existing is explicitly true).
   layer:
     name: order-processor2-deps
     source_dir: lambda-layer        # must contain python/ for a Python runtime

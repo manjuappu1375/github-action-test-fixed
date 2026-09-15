@@ -94,9 +94,32 @@ to finish the OAuth step:
 2. Put your Lambda code in the `source_dir` referenced by the config.
 3. Commit and push to `main`. The workflow detects the new/changed YAML under
    `configs/` and runs `scripts/provision.sh <your-file>` for each one.
-4. Re-running (pushing an edited config, or `workflow_dispatch`) is safe —
-   every step checks for existing resources and updates them instead of
-   failing.
+4. Re-running (pushing an edited config, or `workflow_dispatch`) is safe.
+   A missing Lambda is created, but an existing Lambda is preserved by
+   default: manual code, runtime, layer, version, and configuration changes
+   are not replaced or deleted. The workflow also does not publish another
+   configured layer version in this mode, and CodeBuild skips its Lambda-code
+   deployment so a later pipeline run cannot replace a manual code version.
+
+### Keeping manual Lambda changes
+
+The default is `lambda.reconcile_existing: false`. This means the script only
+creates the Lambda the first time; later provisioning runs leave that
+function's deployed code and configuration untouched. This is the setting in
+both example configs.
+
+If you intentionally want GitHub Actions to make the YAML authoritative for
+an existing function, add or change this value in that config:
+
+```yaml
+lambda:
+  reconcile_existing: true
+```
+
+With `true`, the script again updates the function code, runtime, handler,
+memory, timeout, environment variables, and configured layers, and publishes
+a new configured layer version. It also permits CodeBuild to deploy the code.
+Do not use it when manual Lambda changes must be retained.
 
 To (re)provision on demand without a config change, use **Actions → Provision
 AWS Resources from YAML → Run workflow** and give it the config path.

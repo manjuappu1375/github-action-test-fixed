@@ -74,6 +74,11 @@ LAMBDA_HANDLER=$(jqv '.lambda.handler')
 LAMBDA_MEMORY=$(jqv_or '.lambda.memory_size' "128")
 LAMBDA_TIMEOUT=$(jqv_or '.lambda.timeout' "30")
 LAMBDA_SRC_DIR=$(jqv_or '.lambda.source_dir' "src")
+# Existing functions are intentionally not reconciled by default. This keeps
+# manual console/CLI changes (code version, runtime, layers, configuration,
+# aliases, etc.) in place when the provisioning workflow is rerun. Set this
+# to true in the config only when the YAML should be authoritative.
+LAMBDA_RECONCILE_EXISTING=$(jqv_or '.lambda.reconcile_existing' "false")
 
 # ---------- Optional Lambda Layer ----------
 #
@@ -410,6 +415,20 @@ deploy_lambda() {
   local queue_url="$3"
   local built_layer_arn="$4"
 
+  # A provisioning run creates a missing function, but must not overwrite an
+  # existing function unless the config explicitly opts into reconciliation.
+  # Check this before building layer arguments so a manual function also keeps
+  # its manually attached layer versions.
+  if aws lambda get-function \
+    --function-name "$LAMBDA_NAME" \
+    >/dev/null 2>&1 &&
+    [ "$LAMBDA_RECONCILE_EXISTING" != "true" ]; then
+
+    echo "Lambda already exists; preserving its current code and configuration: $LAMBDA_NAME"
+    echo "  (set lambda.reconcile_existing: true to apply YAML runtime, layer, and configuration values)"
+    return 0
+  fi
+
   # ----------------------------------------------------------
   # Build a clean list of layer ARNs.
   # ----------------------------------------------------------
@@ -476,7 +495,7 @@ deploy_lambda() {
     --function-name "$LAMBDA_NAME" \
     >/dev/null 2>&1; then
 
-    echo "Updating existing Lambda: $LAMBDA_NAME"
+    echo "Reconciling existing Lambda from YAML: $LAMBDA_NAME"
 
     aws lambda update-function-code \
       --function-name "$LAMBDA_NAME" \
@@ -759,7 +778,7 @@ ensure_codebuild_project() {
 
   local role_arn="$1"
 
-  local env_vars="[{name=LAMBDA_NAME,value=${LAMBDA_NAME}},{name=LAMBDA_SRC_DIR,value=${LAMBDA_SRC_DIR}}]"
+  local env_vars="[{name=LAMBDA_NAME,value=${LAMBDA_NAME}},{name=LAMBDA_SRC_DIR,value=${LAMBDA_SRC_DIR}},{name=LAMBDA_RECONCILE_EXISTING,value=${LAMBDA_RECONCILE_EXISTING}]"
 
   if aws codebuild batch-get-projects \
     --names "$CB_PROJECT" \
@@ -1070,9 +1089,23 @@ QUEUE_ARN=$(sqs_arn_from_url "$QUEUE_URL")
 
 LAMBDA_ROLE_ARN=$(ensure_lambda_role)
 
-ZIP_PATH=$(package_lambda)
+# Do not package source or publish a layer for an existing Lambda unless the
+# config deliberately requests reconciliation. Publishing a layer is
+# immutable in AWS, so avoiding it prevents orphaned versions on routine runs.
+if aws lambda get-function \
+  --function-name "$LAMBDA_NAME" \
+  >/dev/null 2>&1 &&
+  [ "$LAMBDA_RECONCILE_EXISTING" != "true" ]; then
 
-BUILT_LAYER_ARN=$(ensure_lambda_layer)
+  ZIP_PATH=""
+  BUILT_LAYER_ARN=""
+
+else
+
+  ZIP_PATH=$(package_lambda)
+  BUILT_LAYER_ARN=$(ensure_lambda_layer)
+
+fi
 
 deploy_lambda \
   "$LAMBDA_ROLE_ARN" \
