@@ -810,7 +810,7 @@ ensure_codebuild_project() {
 
   local role_arn="$1"
 
-  local env_vars="[{name=LAMBDA_NAME,value=${LAMBDA_NAME}},{name=LAMBDA_SRC_DIR,value=${LAMBDA_SRC_DIR}},{name=LAMBDA_RECONCILE_EXISTING,value=${LAMBDA_RECONCILE_EXISTING}]"
+  local env_vars="[{name=LAMBDA_NAME,value=${LAMBDA_NAME}},{name=LAMBDA_SRC_DIR,value=${LAMBDA_SRC_DIR}},{name=LAMBDA_RECONCILE_EXISTING,value=${LAMBDA_RECONCILE_EXISTING}}]"
 
   if aws codebuild batch-get-projects \
     --names "$CB_PROJECT" \
