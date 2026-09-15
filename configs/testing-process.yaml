@@ -17,8 +17,13 @@ lambda:
   source_dir: lambda-src
   reconcile_existing: false
 
+  # Applied only on first Lambda creation. Existing Lambda environment is preserved.
+  environment:
+    APP_NAME: testing-process
+
   # Use an existing published layer
   layer:
+    managed: false
     arn: arn:aws:lambda:us-east-1:842675988954:layer:testing-layer:2
 
   # Optional: also attach any already-existing layers by ARN (e.g. a shared

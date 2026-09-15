@@ -15,7 +15,7 @@ on:
         description: 'Type the app_name from that config file exactly, to confirm you want to delete its resources'
         required: true
       with_iam_and_bucket:
-        description: 'Also delete the IAM roles and S3 artifact bucket? Only say yes if no other config shares this app_name.'
+        description: 'Also delete the IAM roles and S3 artifact bucket? Only say yes when these IAM roles and this bucket belong exclusively to this Lambda.'
         required: true
         default: 'no'
         type: choice
@@ -23,7 +23,7 @@ on:
           - 'no'
           - 'yes'
       with_lambda_layer:
-        description: 'Also delete all versions of the Lambda layer named by this config? Only say yes if the layer is not shared.'
+        description: 'Delete the configured layer version(s)? Only works when lambda.layer.managed: true and no Lambda is using the version.'
         required: true
         default: 'no'
         type: choice

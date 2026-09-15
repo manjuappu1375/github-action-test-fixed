@@ -80,6 +80,11 @@ LAMBDA_SRC_DIR=$(jqv_or '.lambda.source_dir' "src")
 # to true in the config only when the YAML should be authoritative.
 LAMBDA_RECONCILE_EXISTING=$(jqv_or '.lambda.reconcile_existing' "false")
 
+# Environment variables are applied ONLY when a Lambda is first created.
+# Existing Lambda configuration is never reconciled unless explicitly opted in.
+LAMBDA_ENV_JSON=$(echo "$CONFIG_JSON" | jq -c '.lambda.environment // {}')
+
+
 # ---------- Optional Lambda Layer ----------
 #
 # Example:
@@ -149,9 +154,9 @@ ARTIFACT_BUCKET=$(
 
 # ---------- IAM role names ----------
 
-LAMBDA_ROLE_NAME="${APP_NAME}-lambda-role"
-CB_ROLE_NAME="${APP_NAME}-codebuild-role"
-CP_ROLE_NAME="${APP_NAME}-codepipeline-role"
+LAMBDA_ROLE_NAME="${LAMBDA_NAME}-role"
+CB_ROLE_NAME="${LAMBDA_NAME}-codebuild-role"
+CP_ROLE_NAME="${LAMBDA_NAME}-codepipeline-role"
 
 echo "App: $APP_NAME | Region: $AWS_REGION | Account: $ACCOUNT_ID"
 
@@ -290,12 +295,7 @@ ensure_sqs_queue() {
 
   else
 
-    echo "SQS queue already exists: $QUEUE_NAME" >&2
-
-    aws sqs set-queue-attributes \
-      --queue-url "$url" \
-      --attributes "VisibilityTimeout=${VISIBILITY_TIMEOUT}" \
-      >/dev/null
+    echo "SQS queue already exists: $QUEUE_NAME; preserving existing queue attributes" >&2
   fi
 
   echo "$url"
@@ -402,36 +402,50 @@ package_lambda() {
 # ============================================================
 
 ensure_lambda_layer() {
-  # An existing published layer ARN is attached as-is; do not publish a new version.
+  # An explicit existing ARN is always used as-is.
   if [ -n "$LAYER_ARN" ]; then
     echo "$LAYER_ARN"
     return 0
   fi
 
-
   # No layer configured.
-  #
-  # IMPORTANT:
-  # Return successfully without printing anything.
   [ -z "$LAYER_NAME" ] && return 0
 
+  # IMPORTANT: Lambda layer versions are immutable. If a layer with this
+  # name already exists, reuse its latest version instead of publishing a
+  # new version for every Lambda/configuration.
+  local latest_arn
+  latest_arn=$(
+    aws lambda list-layer-versions \
+      --layer-name "$LAYER_NAME" \
+      --query 'Versions | sort_by(@, &Version)[-1].LayerVersionArn' \
+      --output text 2>/dev/null || true
+  )
+
+  if [ -n "$latest_arn" ] && [ "$latest_arn" != "None" ]; then
+    echo "Reusing existing Lambda layer version: $latest_arn" >&2
+    echo "$latest_arn"
+    return 0
+  fi
+
+  if [ -z "$LAYER_SRC_DIR" ]; then
+    echo "ERROR: lambda.layer.name '$LAYER_NAME' is set but lambda.layer.source_dir is empty and no existing layer was found." >&2
+    exit 1
+  fi
+
   if [ ! -d "$LAYER_SRC_DIR" ]; then
-
     echo "ERROR: lambda.layer.source_dir '$LAYER_SRC_DIR' does not exist (relative to repo root)." >&2
-
     exit 1
   fi
 
   local zip_path="/tmp/${LAYER_NAME}-layer.zip"
-
   rm -f "$zip_path"
-
   (
     cd "$LAYER_SRC_DIR"
     zip -r -q "$zip_path" .
   )
 
-  echo "Publishing Lambda layer version: $LAYER_NAME" >&2
+  echo "Publishing first Lambda layer version: $LAYER_NAME" >&2
   echo "Compatible runtimes: $LAYER_RUNTIMES" >&2
 
   aws lambda publish-layer-version \
@@ -448,182 +462,76 @@ ensure_lambda_layer() {
 # ============================================================
 
 deploy_lambda() {
-
   local role_arn="$1"
   local zip_path="$2"
   local queue_url="$3"
   local built_layer_arn="$4"
 
-  # A provisioning run creates a missing function, but must not overwrite an
-  # existing function unless the config explicitly opts into reconciliation.
-  # Check this before building layer arguments so a manual function also keeps
-  # its manually attached layer versions.
-  if aws lambda get-function \
-    --function-name "$LAMBDA_NAME" \
-    >/dev/null 2>&1 &&
-    [ "$LAMBDA_RECONCILE_EXISTING" != "true" ]; then
-
-    echo "Lambda already exists; preserving its current code and configuration: $LAMBDA_NAME"
-    echo "  (set lambda.reconcile_existing: true to apply YAML runtime, layer, and configuration values)"
+  # EXISTING LAMBDA = NO-TOUCH MODE.
+  # This is the key safety rule: runtime, handler, memory, timeout,
+  # environment, layers, code, VPC, concurrency, architecture, aliases,
+  # tracing, and other Lambda settings changed manually in AWS are preserved.
+  if aws lambda get-function --function-name "$LAMBDA_NAME" >/dev/null 2>&1; then
+    echo "Lambda already exists; preserving ALL current Lambda configuration: $LAMBDA_NAME"
+    echo "  No runtime/code/environment/layer/memory/timeout/etc. updates will be made."
     return 0
   fi
-
-  # ----------------------------------------------------------
-  # Build a clean list of layer ARNs.
-  # ----------------------------------------------------------
 
   local layer_arns=()
   local layers_args=()
 
-  # Add newly-created layer only if a real ARN exists.
-  if [ -n "$built_layer_arn" ] &&
-     [ "$built_layer_arn" != "None" ]; then
-
+  if [ -n "$built_layer_arn" ] && [ "$built_layer_arn" != "None" ]; then
     layer_arns+=("$built_layer_arn")
   fi
 
-  # Add existing layer ARNs from configuration.
   for arn in "${EXTRA_LAYER_ARNS[@]}"; do
-
-    if [ -n "$arn" ] &&
-       [ "$arn" != "None" ]; then
-
+    if [ -n "$arn" ] && [ "$arn" != "None" ]; then
       layer_arns+=("$arn")
     fi
-
   done
 
-  # ----------------------------------------------------------
-  # IMPORTANT FIX
-  #
-  # Only create --layers when at least one real ARN exists.
-  #
-  # For example-app.yaml:
-  #
-  #   layer_arns=()
-  #   layers_args=()
-  #
-  # Therefore AWS receives NO --layers argument.
-  #
-  # This prevents:
-  #
-  #   Invalid length for parameter Layers[0], value: 0
-  # ----------------------------------------------------------
+  if [ "${#layer_arns[@]}" -gt 0 ]; then
+    layers_args=(--layers "${layer_arns[@]}")
+    echo "Lambda layer count: ${#layer_arns[@]}"
+    for arn in "${layer_arns[@]}"; do echo "Lambda layer: $arn"; done
+  else
+    echo "Lambda layers: none"
+  fi
+
+  echo "Creating Lambda: $LAMBDA_NAME"
+
+  # Build create-function arguments without ever passing an empty --layers.
+  local env_args=()
+  if [ "$LAMBDA_ENV_JSON" != "{}" ]; then
+    env_args=(--environment "{\"Variables\":${LAMBDA_ENV_JSON}}")
+  fi
 
   if [ "${#layer_arns[@]}" -gt 0 ]; then
-
-    layers_args=(--layers "${layer_arns[@]}")
-
-    echo "Lambda layer count: ${#layer_arns[@]}"
-
-    for arn in "${layer_arns[@]}"; do
-      echo "Lambda layer: $arn"
-    done
-
-  else
-
-    echo "Lambda layers: none"
-
-  fi
-
-  # ----------------------------------------------------------
-  # Existing Lambda
-  # ----------------------------------------------------------
-
-  if aws lambda get-function \
-    --function-name "$LAMBDA_NAME" \
-    >/dev/null 2>&1; then
-
-    echo "Reconciling existing Lambda from YAML: $LAMBDA_NAME"
-
-    aws lambda update-function-code \
+    run_with_role_retry aws lambda create-function \
       --function-name "$LAMBDA_NAME" \
+      --runtime "$LAMBDA_RUNTIME" \
+      --role "$role_arn" \
+      --handler "$LAMBDA_HANDLER" \
+      --memory-size "$LAMBDA_MEMORY" \
+      --timeout "$LAMBDA_TIMEOUT" \
       --zip-file "fileb://${zip_path}" \
+      "${env_args[@]}" \
+      "${layers_args[@]}" \
       >/dev/null
-
-    aws lambda wait function-updated \
-      --function-name "$LAMBDA_NAME"
-
-    # IMPORTANT:
-    #
-    # If there are no layers, do not pass --layers.
-    #
-
-    if [ "${#layer_arns[@]}" -gt 0 ]; then
-
-      aws lambda update-function-configuration \
-        --function-name "$LAMBDA_NAME" \
-        --runtime "$LAMBDA_RUNTIME" \
-        --handler "$LAMBDA_HANDLER" \
-        --memory-size "$LAMBDA_MEMORY" \
-        --timeout "$LAMBDA_TIMEOUT" \
-        --environment "Variables={QUEUE_URL=${queue_url}}" \
-        "${layers_args[@]}" \
-        >/dev/null
-
-    else
-
-      aws lambda update-function-configuration \
-        --function-name "$LAMBDA_NAME" \
-        --runtime "$LAMBDA_RUNTIME" \
-        --handler "$LAMBDA_HANDLER" \
-        --memory-size "$LAMBDA_MEMORY" \
-        --timeout "$LAMBDA_TIMEOUT" \
-        --environment "Variables={QUEUE_URL=${queue_url}}" \
-        >/dev/null
-
-    fi
-
-    aws lambda wait function-updated \
-      --function-name "$LAMBDA_NAME"
-
-  # ----------------------------------------------------------
-  # New Lambda
-  # ----------------------------------------------------------
-
   else
-
-    echo "Creating Lambda: $LAMBDA_NAME"
-
-    # IMPORTANT:
-    #
-    # Separate the two cases instead of relying on an empty
-    # Bash array at the end of the AWS command.
-    #
-
-    if [ "${#layer_arns[@]}" -gt 0 ]; then
-
-      run_with_role_retry aws lambda create-function \
-        --function-name "$LAMBDA_NAME" \
-        --runtime "$LAMBDA_RUNTIME" \
-        --role "$role_arn" \
-        --handler "$LAMBDA_HANDLER" \
-        --memory-size "$LAMBDA_MEMORY" \
-        --timeout "$LAMBDA_TIMEOUT" \
-        --zip-file "fileb://${zip_path}" \
-        --environment "Variables={QUEUE_URL=${queue_url}}" \
-        "${layers_args[@]}" \
-        >/dev/null
-
-    else
-
-      run_with_role_retry aws lambda create-function \
-        --function-name "$LAMBDA_NAME" \
-        --runtime "$LAMBDA_RUNTIME" \
-        --role "$role_arn" \
-        --handler "$LAMBDA_HANDLER" \
-        --memory-size "$LAMBDA_MEMORY" \
-        --timeout "$LAMBDA_TIMEOUT" \
-        --zip-file "fileb://${zip_path}" \
-        --environment "Variables={QUEUE_URL=${queue_url}}" \
-        >/dev/null
-
-    fi
-
-    aws lambda wait function-active \
-      --function-name "$LAMBDA_NAME"
-
+    run_with_role_retry aws lambda create-function \
+      --function-name "$LAMBDA_NAME" \
+      --runtime "$LAMBDA_RUNTIME" \
+      --role "$role_arn" \
+      --handler "$LAMBDA_HANDLER" \
+      --memory-size "$LAMBDA_MEMORY" \
+      --timeout "$LAMBDA_TIMEOUT" \
+      --zip-file "fileb://${zip_path}" \
+      "${env_args[@]}" \
+      >/dev/null
   fi
+
+  aws lambda wait function-active --function-name "$LAMBDA_NAME"
 }
 
 # ============================================================
@@ -631,7 +539,6 @@ deploy_lambda() {
 # ============================================================
 
 ensure_event_source_mapping() {
-
   local queue_arn="$1"
   local existing
 
@@ -640,26 +547,20 @@ ensure_event_source_mapping() {
       --function-name "$LAMBDA_NAME" \
       --event-source-arn "$queue_arn" \
       --query 'EventSourceMappings[0].UUID' \
-      --output text \
-      2>/dev/null || true
+      --output text 2>/dev/null || true
   )
 
-  if [ -z "$existing" ] ||
-     [ "$existing" = "None" ]; then
-
-    echo "Wiring SQS -> Lambda event source mapping"
-
-    aws lambda create-event-source-mapping \
-      --function-name "$LAMBDA_NAME" \
-      --event-source-arn "$queue_arn" \
-      --batch-size 10 \
-      >/dev/null
-
-  else
-
-    echo "Event source mapping already exists"
-
+  if [ -n "$existing" ] && [ "$existing" != "None" ]; then
+    echo "SQS -> Lambda event source mapping already exists; preserving it"
+    return 0
   fi
+
+  echo "Creating SQS -> Lambda event source mapping"
+  aws lambda create-event-source-mapping \
+    --function-name "$LAMBDA_NAME" \
+    --event-source-arn "$queue_arn" \
+    --batch-size 10 \
+    >/dev/null
 }
 
 # ============================================================
@@ -1120,39 +1021,30 @@ JSON
 # Run
 # ============================================================
 
-echo "=== Starting provisioning ==="
+echo "=== Starting provisioning for ONE config only ==="
 
 QUEUE_URL=$(ensure_sqs_queue)
-
 QUEUE_ARN=$(sqs_arn_from_url "$QUEUE_URL")
-
 LAMBDA_ROLE_ARN=$(ensure_lambda_role)
 
-# Do not package source or publish a layer for an existing Lambda unless the
-# config deliberately requests reconciliation. Publishing a layer is
-# immutable in AWS, so avoiding it prevents orphaned versions on routine runs.
-if aws lambda get-function \
-  --function-name "$LAMBDA_NAME" \
-  >/dev/null 2>&1 &&
-  [ "$LAMBDA_RECONCILE_EXISTING" != "true" ]; then
-
-  ZIP_PATH=""
-  BUILT_LAYER_ARN=""
-
-else
-
-  ZIP_PATH=$(package_lambda)
-  BUILT_LAYER_ARN=$(ensure_lambda_layer)
-
+LAMBDA_EXISTS=false
+if aws lambda get-function --function-name "$LAMBDA_NAME" >/dev/null 2>&1; then
+  LAMBDA_EXISTS=true
 fi
 
-deploy_lambda \
-  "$LAMBDA_ROLE_ARN" \
-  "$ZIP_PATH" \
-  "$QUEUE_URL" \
-  "$BUILT_LAYER_ARN"
-
-ensure_event_source_mapping "$QUEUE_ARN"
+if [ "$LAMBDA_EXISTS" = "true" ]; then
+  # Existing Lambda is strictly no-touch. Do not package code, publish layers,
+  # update configuration, or modify its event source mapping.
+  ZIP_PATH=""
+  BUILT_LAYER_ARN=""
+  deploy_lambda "$LAMBDA_ROLE_ARN" "$ZIP_PATH" "$QUEUE_URL" "$BUILT_LAYER_ARN"
+  echo "Existing Lambda detected: its current SQS trigger/configuration is preserved."
+else
+  ZIP_PATH=$(package_lambda)
+  BUILT_LAYER_ARN=$(ensure_lambda_layer)
+  deploy_lambda "$LAMBDA_ROLE_ARN" "$ZIP_PATH" "$QUEUE_URL" "$BUILT_LAYER_ARN"
+  ensure_event_source_mapping "$QUEUE_ARN"
+fi
 
 ensure_artifact_bucket
 

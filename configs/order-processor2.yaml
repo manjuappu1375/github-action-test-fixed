@@ -15,13 +15,18 @@ lambda:
   memory_size: 128
   timeout: 30
   source_dir: lambda-src
-  # Existing functions are preserved on future provisioning runs. Set true
-  # only if this YAML should overwrite manual runtime/layer/config changes.
+  # Existing Lambda is always preserved after creation. This flag is retained
+  # for backward compatibility but is no longer used by provision.sh.
   reconcile_existing: false
 
+  # Applied only on first Lambda creation. Existing Lambda environment is preserved.
+  environment:
+    APP_NAME: order-processor2
+
   # Optional: attach a Lambda Layer built from local code when the function
-  # is first created (or when reconcile_existing is explicitly true).
+  # is first created. Existing Lambda configuration is never overwritten.
   layer:
+    managed: true
     name: order-processor2-deps
     source_dir: lambda-layer        # must contain python/ for a Python runtime
     compatible_runtimes: [python3.12]
