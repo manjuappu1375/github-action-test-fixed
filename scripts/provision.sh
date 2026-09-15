@@ -98,6 +98,7 @@ LAMBDA_RECONCILE_EXISTING=$(jqv_or '.lambda.reconcile_existing' "false")
 #     - arn:aws:lambda:us-east-1:123456789012:layer:some-layer:3
 
 LAYER_NAME=$(jqv_or '.lambda.layer.name' "")
+LAYER_ARN=$(jqv_or '.lambda.layer.arn' "")
 LAYER_SRC_DIR=$(jqv_or '.lambda.layer.source_dir' "")
 LAYER_DESC=$(jqv_or '.lambda.layer.description' "Layer for ${APP_NAME}")
 
@@ -401,6 +402,12 @@ package_lambda() {
 # ============================================================
 
 ensure_lambda_layer() {
+  # An existing published layer ARN is attached as-is; do not publish a new version.
+  if [ -n "$LAYER_ARN" ]; then
+    echo "$LAYER_ARN"
+    return 0
+  fi
+
 
   # No layer configured.
   #
