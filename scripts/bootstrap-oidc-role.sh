@@ -113,9 +113,7 @@ aws iam put-role-policy --role-name "$ROLE_NAME" \
         \"Effect\": \"Allow\",
         \"Action\": \"iam:PassRole\",
         \"Resource\": [
-          \"arn:aws:iam::${ACCOUNT_ID}:role/*-lambda-role\",
-          \"arn:aws:iam::${ACCOUNT_ID}:role/*-codebuild-role\",
-          \"arn:aws:iam::${ACCOUNT_ID}:role/*-codepipeline-role\"
+          \"arn:aws:iam::${ACCOUNT_ID}:role/*-role\"
         ],
         \"Condition\": {
           \"StringEquals\": {
