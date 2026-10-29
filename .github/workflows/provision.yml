@@ -19,6 +19,7 @@ on:
         options:
           - "configs/example-app.yaml"
           - "configs/order-processor2.yaml"
+          - "configs/order-processor3.yaml"
           - "configs/shared-layer-lambda.yaml"
           - "configs/testing-process.yaml"
 
