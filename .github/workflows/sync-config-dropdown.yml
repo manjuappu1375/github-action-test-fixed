@@ -1,0 +1,36 @@
+name: Sync config dropdown
+
+on:
+  push:
+    branches: [ '**' ]
+    paths:
+      - 'configs/**.yaml'
+      - 'configs/**.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Updating a workflow file requires a token with workflow-file write access.
+          token: ${{ secrets.CONFIG_SYNC_TOKEN }}
+
+      - name: Update dropdown choices
+        run: python3 scripts/sync-config-dropdown.py
+
+      - name: Commit dropdown changes
+        run: |
+          if git diff --quiet -- .github/workflows/provision.yml; then
+            echo "Config dropdown is already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/provision.yml
+          git commit -m "Sync workflow config dropdown"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -124,11 +124,18 @@ changes must be retained.
 To (re)provision on demand without a config change, use **Actions → Provision
 AWS Resources from YAML → Run workflow**, select the branch, then choose a
 config from the dropdown. Keep the `config_file` choices in
-`.github/workflows/provision.yml` in sync when adding or removing files under
-`configs/`; GitHub Actions does not populate dispatch dropdown choices from
-repository files automatically. The workflow checks that the selected file
-exists in the selected branch before provisioning it. Pushes to `main` still
-provision changed config files automatically.
+`.github/workflows/provision.yml` synchronized with files under `configs/`.
+The **Sync config dropdown** workflow updates the choices after config files
+are pushed to a branch, so each branch gets choices from its own `configs/`
+directory. Configure a repository Actions secret named
+`CONFIG_SYNC_TOKEN` with a classic personal access token that has the `workflow`
+scope and `repo` scope for a private repository (`public_repo` for a public
+repository). This lets the sync workflow commit the updated workflow file.
+GitHub requires the choices to be written into the workflow; the menu itself
+cannot read files dynamically.
+The provisioning workflow checks that the selected file exists in the selected
+branch before deploying it. Pushes to `main` still provision changed config
+files automatically.
 
 ## Notes / things to tighten before production
 

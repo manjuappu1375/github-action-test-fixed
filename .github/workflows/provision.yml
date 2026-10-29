@@ -17,10 +17,10 @@ on:
         type: choice
         required: true
         options:
-          - configs/example-app.yaml
-          - configs/order-processor2.yaml
-          - configs/shared-layer-lambda.yaml
-          - configs/testing-process.yaml
+          - "configs/example-app.yaml"
+          - "configs/order-processor2.yaml"
+          - "configs/shared-layer-lambda.yaml"
+          - "configs/testing-process.yaml"
 
 permissions:
   id-token: write   # required for OIDC -> AWS role assumption
