@@ -122,12 +122,13 @@ timeout, environment variables, or layers. Keep it `false` if manual code
 changes must be retained.
 
 To (re)provision on demand without a config change, use **Actions → Provision
-AWS Resources from YAML → Run workflow**, select the branch, and enter the
-config path (for example, `configs/example-app.yaml`). GitHub Actions does not
-support populating a `workflow_dispatch` dropdown from repository files, so the
-path input accepts any YAML config present under `configs/` on the selected
-branch. The workflow checks that the file exists before provisioning it. Pushes
-to `main` still provision changed config files automatically.
+AWS Resources from YAML → Run workflow**, select the branch, then choose a
+config from the dropdown. Keep the `config_file` choices in
+`.github/workflows/provision.yml` in sync when adding or removing files under
+`configs/`; GitHub Actions does not populate dispatch dropdown choices from
+repository files automatically. The workflow checks that the selected file
+exists in the selected branch before provisioning it. Pushes to `main` still
+provision changed config files automatically.
 
 ## Notes / things to tighten before production
 
