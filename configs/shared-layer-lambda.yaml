@@ -3,7 +3,7 @@ aws_region: us-east-1
 
 lambda:
   function_name: shared-layer-lambda-fn
-  runtime: python3.12
+  runtime: python3.11
   handler: app.handler
   memory_size: 128
   timeout: 30
