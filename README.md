@@ -122,7 +122,10 @@ a new configured layer version. It also permits CodeBuild to deploy the code.
 Do not use it when manual Lambda changes must be retained.
 
 To (re)provision on demand without a config change, use **Actions → Provision
-AWS Resources from YAML → Run workflow** and give it the config path.
+AWS Resources from YAML → Run workflow** and select the config from the
+dropdown. When you add a config file, add its path to the `options` list in
+`.github/workflows/provision.yml` so it appears in the dropdown. Pushes to
+`main` still provision changed config files automatically.
 
 ## Notes / things to tighten before production
 
@@ -165,9 +168,3 @@ AWS Resources from YAML → Run workflow** and give it the config path.
 - Provisioning is serialized on `main` so two concurrent runs do not race over the same resources.
 
 
-### Deprovision safety
-
-`deprovision.yml` is manual-only. It validates that the selected file is under
-`configs/`, requires the exact `app_name` as confirmation, and defaults to
-leaving IAM roles, the artifact bucket, and Lambda layer versions alone.
-Those shared/destructive resources require explicit workflow options.

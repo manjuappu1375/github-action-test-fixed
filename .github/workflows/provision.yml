@@ -13,7 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       config_file:
-        description: 'Path to a specific config YAML to (re)provision, e.g. configs/example-app.yaml'
+        description: 'Select the config YAML to (re)provision'
+        type: choice
+        options:
+          - configs/example-app.yaml
+          - configs/order-processor2.yaml
+          - configs/testing-process.yaml
         required: true
 
 permissions:
@@ -87,13 +92,8 @@ jobs:
             if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
               files=$(git ls-files 'configs/*.yaml' 'configs/*.yml')
             else
-              # --diff-filter=d excludes deleted files - a deleted config
-              # means "stop managing this," not "run provision.sh on a file
-              # that no longer exists." (Deliberately not auto-running
-              # deprovision.sh on a delete either: a file deletion isn't a
-              # safe enough signal to automatically tear down real AWS
-              # resources. Run scripts/deprovision.sh manually, or via the
-              # separate Deprovision workflow, when you actually want that.)
+              # --diff-filter=d excludes deleted files so a deleted config
+              # is never passed to provision.sh.
               files=$(git diff --name-only --diff-filter=d "$before" "$CURRENT_SHA" -- 'configs/*.yaml' 'configs/*.yml')
             fi
             echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
