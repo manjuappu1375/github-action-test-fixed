@@ -13,12 +13,8 @@ on:
   workflow_dispatch:
     inputs:
       config_file:
-        description: 'Select the config YAML to (re)provision'
-        type: choice
-        options:
-          - configs/example-app.yaml
-          - configs/order-processor2.yaml
-          - configs/testing-process.yaml
+        description: 'Path to a config YAML in the selected branch (for example, configs/example-app.yaml)'
+        type: string
         required: true
 
 permissions:
@@ -74,9 +70,21 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             config="$INPUT_CONFIG_FILE"
             case "$config" in
-              configs/*.yaml|configs/*.yml) ;;
+              configs/*) ;;
               *)
-                echo "::error::config_file must point to configs/*.yaml or configs/*.yml"
+                echo "::error::config_file must be a YAML file directly under configs/"
+                exit 1
+                ;;
+            esac
+            filename=${config#configs/}
+            case "$filename" in
+              *[!A-Za-z0-9._-]*|'')
+                echo "::error::config_file may only contain letters, numbers, dots, underscores, and hyphens"
+                exit 1
+                ;;
+              *.yaml|*.yml) ;;
+              *)
+                echo "::error::config_file must end in .yaml or .yml"
                 exit 1
                 ;;
             esac
@@ -100,9 +108,11 @@ jobs:
           fi
 
       - name: Provision resources for each changed config
+        env:
+          CONFIG_FILES: ${{ steps.changed.outputs.files }}
         run: |
           chmod +x scripts/provision.sh
-          for f in ${{ steps.changed.outputs.files }}; do
+          for f in $CONFIG_FILES; do
             [ -z "$f" ] && continue
             if [ ! -f "$f" ]; then
               echo "::warning::Skipping $f - file no longer exists (probably deleted in this push)."

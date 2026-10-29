@@ -698,7 +698,8 @@ ensure_codebuild_role() {
           \"Effect\": \"Allow\",
           \"Action\": [
             \"lambda:UpdateFunctionCode\",
-            \"lambda:GetFunction\"
+            \"lambda:GetFunction\",
+            \"lambda:GetFunctionConfiguration\"
           ],
           \"Resource\": \"arn:aws:lambda:${AWS_REGION}:${ACCOUNT_ID}:function:${LAMBDA_NAME}\"
         }

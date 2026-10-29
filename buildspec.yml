@@ -10,19 +10,19 @@ phases:
   build:
     commands:
       - |
-          if [ "${LAMBDA_RECONCILE_EXISTING:-false}" != "true" ]; then
+          if [ "${LAMBDA_RECONCILE_EXISTING:-false}" = "true" ]; then
+            echo "Packaging Lambda from $LAMBDA_SRC_DIR"
+            cd "$CODEBUILD_SRC_DIR/$LAMBDA_SRC_DIR"
+            zip -r "$CODEBUILD_SRC_DIR/function.zip" .
+            cd "$CODEBUILD_SRC_DIR"
+            echo "Updating Lambda function code"
+            aws lambda update-function-code \
+              --function-name "$LAMBDA_NAME" \
+              --zip-file fileb://function.zip
+            aws lambda wait function-updated --function-name "$LAMBDA_NAME"
+          else
             echo "Preserving the existing Lambda code; set lambda.reconcile_existing: true to deploy from CodeBuild."
-            exit 0
           fi
-      - echo "Packaging Lambda from $LAMBDA_SRC_DIR"
-      - cd "$CODEBUILD_SRC_DIR/$LAMBDA_SRC_DIR"
-      - zip -r "$CODEBUILD_SRC_DIR/function.zip" .
-      - cd "$CODEBUILD_SRC_DIR"
-      - echo "Updating Lambda function code"
-      - aws lambda update-function-code
-          --function-name "$LAMBDA_NAME"
-          --zip-file fileb://function.zip
-      - aws lambda wait function-updated --function-name "$LAMBDA_NAME"
 
 artifacts:
   files:

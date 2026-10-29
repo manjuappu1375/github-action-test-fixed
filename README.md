@@ -103,29 +103,31 @@ to finish the OAuth step:
 
 ### Keeping manual Lambda changes
 
-The default is `lambda.reconcile_existing: false`. This means the script only
-creates the Lambda the first time; later provisioning runs leave that
-function's deployed code and configuration untouched. This is the setting in
-both example configs.
+Provisioning creates a Lambda if it does not exist. If it already exists,
+`provision.sh` preserves its code, runtime, layers, and configuration on every
+run. The `lambda.reconcile_existing` setting does not change that behavior.
 
-If you intentionally want GitHub Actions to make the YAML authoritative for
-an existing function, add or change this value in that config:
+That setting controls only whether CodeBuild can deploy Lambda code on later
+CodePipeline runs. It defaults to `false` in the configs. To allow those code
+deployments, set:
 
 ```yaml
 lambda:
   reconcile_existing: true
 ```
 
-With `true`, the script again updates the function code, runtime, handler,
-memory, timeout, environment variables, and configured layers, and publishes
-a new configured layer version. It also permits CodeBuild to deploy the code.
-Do not use it when manual Lambda changes must be retained.
+With `true`, CodeBuild can replace the function's deployed code with the
+version from the repository. It does not change runtime, handler, memory,
+timeout, environment variables, or layers. Keep it `false` if manual code
+changes must be retained.
 
 To (re)provision on demand without a config change, use **Actions → Provision
-AWS Resources from YAML → Run workflow** and select the config from the
-dropdown. When you add a config file, add its path to the `options` list in
-`.github/workflows/provision.yml` so it appears in the dropdown. Pushes to
-`main` still provision changed config files automatically.
+AWS Resources from YAML → Run workflow**, select the branch, and enter the
+config path (for example, `configs/example-app.yaml`). GitHub Actions does not
+support populating a `workflow_dispatch` dropdown from repository files, so the
+path input accepts any YAML config present under `configs/` on the selected
+branch. The workflow checks that the file exists before provisioning it. Pushes
+to `main` still provision changed config files automatically.
 
 ## Notes / things to tighten before production
 
