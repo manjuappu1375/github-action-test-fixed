@@ -123,20 +123,15 @@ changes must be retained.
 
 To (re)provision on demand without a config change, use **Actions → Provision
 AWS Resources from YAML → Run workflow**, select the branch, then choose a
-config-file environment from the dropdown. GitHub’s environment input uses
-repository environments instead of a YAML `options` list. The **Sync config
-dropdown** workflow creates a `config-file--<filename>` environment for each
-YAML file found under `configs/` across branches and removes stale entries when
-files are deleted from all branches. Run **Actions → Sync config dropdown →
-Run workflow** once to populate the initial list. Configure a repository Actions
-secret named `CONFIG_SYNC_TOKEN` with a fine-grained token limited to this
-repository and **Administration: write** permission, or a classic token with
-`repo` scope, so the sync can manage environments. The provision workflow
-converts the selected environment back to its config path and checks that the
-file exists in the selected branch before provisioning. The environment list
-is shared across branches, so it can include a config that is absent from the
-branch selected for a run; that file is rejected by the existence check. Pushes
-to `main` still provision changed config files automatically.
+config from the dropdown. Install the repository Git hook once with
+`sh scripts/install-git-hooks.sh`. On each commit that adds, removes, or changes
+a YAML file directly under `configs/`, the hook regenerates the dropdown in
+`.github/workflows/provision.yml` and stages that workflow file with the config
+change. Push the commit to update the GitHub Actions form. The selected config
+must exist on the branch chosen for the run. For changes made through GitHub's
+web editor, run `python3 scripts/sync-config-dropdown.py` in a local checkout
+and commit the updated workflow. Pushes to `main` still provision changed
+config files automatically.
 
 ## Notes / things to tighten before production
 

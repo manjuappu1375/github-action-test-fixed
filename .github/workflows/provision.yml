@@ -13,9 +13,14 @@ on:
   workflow_dispatch:
     inputs:
       config_file:
-        description: 'Select the config-file environment for a YAML under configs/'
-        type: environment
+        description: 'Config YAML to provision from the selected branch'
+        type: choice
         required: true
+        options:
+          - "configs/example-app.yaml"
+          - "configs/order-processor2.yaml"
+          - "configs/shared-layer-lambda.yaml"
+          - "configs/testing-process.yaml"
 
 permissions:
   id-token: write   # required for OIDC -> AWS role assumption
@@ -63,19 +68,12 @@ jobs:
         id: changed
         env:
           EVENT_NAME: ${{ github.event_name }}
-          INPUT_CONFIG_ENV: ${{ inputs.config_file }}
+          INPUT_CONFIG_FILE: ${{ inputs.config_file }}
           BEFORE_SHA: ${{ github.event.before }}
           CURRENT_SHA: ${{ github.sha }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            case "$INPUT_CONFIG_ENV" in
-              config-file--*) filename=${INPUT_CONFIG_ENV#config-file--} ;;
-              *)
-                echo "::error::Choose a config-file environment from the dropdown."
-                exit 1
-                ;;
-            esac
-            config="configs/$filename"
+            config="$INPUT_CONFIG_FILE"
             case "$config" in
               configs/*) ;;
               *)
@@ -83,6 +81,7 @@ jobs:
                 exit 1
                 ;;
             esac
+            filename=${config#configs/}
             case "$filename" in
               *[!A-Za-z0-9._-]*|'')
                 echo "::error::config_file may only contain letters, numbers, dots, underscores, and hyphens"

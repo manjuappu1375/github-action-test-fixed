@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if git diff --cached --quiet -- configs/; then
+  exit 0
+fi
+
+python3 scripts/sync-config-dropdown.py
+git add .github/workflows/provision.yml
