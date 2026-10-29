@@ -1,51 +1,89 @@
 #!/usr/bin/env python3
-"""Refresh the workflow_dispatch config choices from configs/*.yaml files."""
+"""Sync config files to reserved GitHub environments for the dispatch menu."""
 
 import json
+import os
 import re
-from pathlib import Path
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
 
 
-workflow = Path(".github/workflows/provision.yml")
-config_dir = Path("configs")
-config_files = sorted(
-    (
-        path
-        for path in config_dir.iterdir()
-        if path.is_file() and path.suffix.lower() in {".yaml", ".yml"}
-    ),
-    key=lambda path: path.name.lower(),
-)
+PREFIX = "config-file--"
+API_VERSION = "2022-11-28"
+repo = os.environ["GITHUB_REPOSITORY"]
+token = os.environ["CONFIG_SYNC_TOKEN"]
+api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
 
-if not config_files:
-    raise SystemExit("No YAML config files found directly under configs/.")
+if not token:
+    raise SystemExit("Set the repository Actions secret CONFIG_SYNC_TOKEN first.")
 
-invalid = [
-    path.name
-    for path in config_files
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", path.name)
-]
-if invalid:
-    raise SystemExit(
-        "Config filenames must contain only letters, numbers, dots, "
-        f"underscores, and hyphens: {', '.join(invalid)}"
+
+def git(*args):
+    return subprocess.check_output(["git", *args], text=True).splitlines()
+
+
+def config_filenames():
+    refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin")
+    refs = [ref for ref in refs if ref != "origin/HEAD"]
+    refs.append("HEAD")
+
+    filenames = set()
+    for ref in refs:
+        for path in git("ls-tree", "-r", "--name-only", ref, "--", "configs"):
+            match = re.fullmatch(r"configs/([A-Za-z0-9._-]+\.(?:yaml|yml))", path)
+            if match:
+                filenames.add(match.group(1))
+    return filenames
+
+
+def request(method, path):
+    req = urllib.request.Request(
+        f"{api_url}{path}",
+        data=b"{}" if method == "PUT" else None,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": API_VERSION,
+            "Content-Type": "application/json",
+        },
+        method=method,
     )
+    try:
+        with urllib.request.urlopen(req) as response:
+            return json.load(response) if response.status != 204 else None
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"GitHub API {method} {path} failed: {error.code} {detail}")
 
-text = workflow.read_text()
-start = text.index("      config_file:\n")
-end = text.index("\n\npermissions:", start)
-input_block = [
-    "      config_file:",
-    "        description: 'Config YAML to provision from the selected branch'",
-    "        type: choice",
-    "        required: true",
-    "        options:",
-    *(f"          - {json.dumps(path.as_posix())}" for path in config_files),
-]
-updated = text[:start] + "\n".join(input_block) + text[end:]
 
-if updated != text:
-    workflow.write_text(updated)
-    print(f"Updated config dropdown with {len(config_files)} file(s).")
-else:
-    print(f"Config dropdown already has all {len(config_files)} file(s).")
+def all_environments():
+    result = []
+    page = 1
+    while True:
+        data = request(
+            "GET",
+            f"/repos/{repo}/environments?per_page=100&page={page}",
+        )
+        batch = data.get("environments", [])
+        result.extend(item["name"] for item in batch)
+        if len(batch) < 100:
+            return result
+        page += 1
+
+
+filenames = config_filenames()
+desired = {f"{PREFIX}{filename}" for filename in filenames}
+current = {name for name in all_environments() if name.startswith(PREFIX)}
+
+for name in sorted(desired - current):
+    request("PUT", f"/repos/{repo}/environments/{urllib.parse.quote(name, safe='')}")
+    print(f"Added config dropdown entry: {name}")
+
+for name in sorted(current - desired):
+    request("DELETE", f"/repos/{repo}/environments/{urllib.parse.quote(name, safe='')}")
+    print(f"Removed stale config dropdown entry: {name}")
+
+if desired == current:
+    print(f"Config dropdown is up to date with {len(desired)} file(s).")

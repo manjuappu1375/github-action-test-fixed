@@ -123,19 +123,20 @@ changes must be retained.
 
 To (re)provision on demand without a config change, use **Actions → Provision
 AWS Resources from YAML → Run workflow**, select the branch, then choose a
-config from the dropdown. Keep the `config_file` choices in
-`.github/workflows/provision.yml` synchronized with files under `configs/`.
-The **Sync config dropdown** workflow updates the choices after config files
-are pushed to a branch, so each branch gets choices from its own `configs/`
-directory. Configure a repository Actions secret named
-`CONFIG_SYNC_TOKEN` with a classic personal access token that has the `workflow`
-scope and `repo` scope for a private repository (`public_repo` for a public
-repository). This lets the sync workflow commit the updated workflow file.
-GitHub requires the choices to be written into the workflow; the menu itself
-cannot read files dynamically.
-The provisioning workflow checks that the selected file exists in the selected
-branch before deploying it. Pushes to `main` still provision changed config
-files automatically.
+config-file environment from the dropdown. GitHub’s environment input uses
+repository environments instead of a YAML `options` list. The **Sync config
+dropdown** workflow creates a `config-file--<filename>` environment for each
+YAML file found under `configs/` across branches and removes stale entries when
+files are deleted from all branches. Run **Actions → Sync config dropdown →
+Run workflow** once to populate the initial list. Configure a repository Actions
+secret named `CONFIG_SYNC_TOKEN` with a fine-grained token limited to this
+repository and **Administration: write** permission, or a classic token with
+`repo` scope, so the sync can manage environments. The provision workflow
+converts the selected environment back to its config path and checks that the
+file exists in the selected branch before provisioning. The environment list
+is shared across branches, so it can include a config that is absent from the
+branch selected for a run; that file is rejected by the existence check. Pushes
+to `main` still provision changed config files automatically.
 
 ## Notes / things to tighten before production
 
